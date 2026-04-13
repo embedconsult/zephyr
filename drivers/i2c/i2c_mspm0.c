@@ -79,6 +79,7 @@ static uint32_t i2c_mspm0_iidx_to_mask(DL_I2C_IIDX iidx)
 
 static void i2c_mspm0_target_load_tx(const struct device *dev)
 {
+	const struct i2c_mspm0_config *config = dev->config;
 	struct i2c_mspm0_data *data = dev->data;
 	struct i2c_target_config *target_cfg = data->target_cfg;
 	uint8_t value = 0xffU;
@@ -98,7 +99,7 @@ static void i2c_mspm0_target_load_tx(const struct device *dev)
 	}
 
 	if (ret == 0) {
-		DL_I2C_transmitTargetData(((const struct i2c_mspm0_config *)dev->config)->regs, value);
+		DL_I2C_transmitTargetData(config->regs, value);
 	} else {
 		LOG_DBG("target read callback rejected byte: %d", ret);
 	}
@@ -120,6 +121,8 @@ static void i2c_mspm0_target_drain_rx(const struct device *dev)
 	cb = target_cfg->callbacks;
 	if (cb->write_received == NULL) {
 		while (DL_I2C_receiveTargetDataCheck(config->regs, &value)) {
+			DL_I2C_setTargetACKOverrideValue(config->regs,
+							 DL_I2C_TARGET_RESPONSE_OVERRIDE_VALUE_ACK);
 		}
 		return;
 	}
@@ -127,9 +130,14 @@ static void i2c_mspm0_target_drain_rx(const struct device *dev)
 	while (DL_I2C_receiveTargetDataCheck(config->regs, &value)) {
 		ret = cb->write_received(target_cfg, value);
 		if (ret != 0) {
+			DL_I2C_setTargetACKOverrideValue(config->regs,
+							 DL_I2C_TARGET_RESPONSE_OVERRIDE_VALUE_NACK);
 			LOG_DBG("target write callback rejected byte: %d", ret);
 			break;
 		}
+
+		DL_I2C_setTargetACKOverrideValue(config->regs,
+						 DL_I2C_TARGET_RESPONSE_OVERRIDE_VALUE_ACK);
 	}
 }
 
@@ -153,6 +161,8 @@ static int i2c_mspm0_target_sync_direction(const struct device *dev)
 		if (previous_direction != MSPM0_I2C_TARGET_READ) {
 			data->direction = MSPM0_I2C_TARGET_READ;
 			data->first_read = true;
+			DL_I2C_setTargetACKOverrideValue(config->regs,
+							 DL_I2C_TARGET_RESPONSE_OVERRIDE_VALUE_ACK);
 			i2c_mspm0_target_load_tx(dev);
 		}
 		return previous_direction;
@@ -163,7 +173,13 @@ static int i2c_mspm0_target_sync_direction(const struct device *dev)
 			data->direction = MSPM0_I2C_TARGET_WRITE;
 			data->first_read = true;
 			if (cb->write_requested != NULL) {
-				(void)cb->write_requested(target_cfg);
+				if (cb->write_requested(target_cfg) == 0) {
+					DL_I2C_setTargetACKOverrideValue(
+						config->regs, DL_I2C_TARGET_RESPONSE_OVERRIDE_VALUE_ACK);
+				} else {
+					DL_I2C_setTargetACKOverrideValue(
+						config->regs, DL_I2C_TARGET_RESPONSE_OVERRIDE_VALUE_NACK);
+				}
 			}
 		}
 		return previous_direction;
@@ -181,6 +197,7 @@ static void i2c_mspm0_target_start(const struct device *dev)
 	DL_I2C_flushTargetTXFIFO(config->regs);
 	data->direction = MSPM0_I2C_TARGET_IDLE;
 	data->first_read = true;
+	DL_I2C_setTargetACKOverrideValue(config->regs, DL_I2C_TARGET_RESPONSE_OVERRIDE_VALUE_ACK);
 	(void)i2c_mspm0_target_sync_direction(dev);
 }
 
@@ -286,8 +303,8 @@ static int i2c_mspm0_target_register(const struct device *dev, struct i2c_target
 	DL_I2C_setTargetRXFIFOThreshold(config->regs, DL_I2C_RX_FIFO_LEVEL_BYTES_1);
 	DL_I2C_setTargetTXFIFOThreshold(config->regs, DL_I2C_TX_FIFO_LEVEL_EMPTY);
 	DL_I2C_setTargetACKOverrideValue(config->regs, DL_I2C_TARGET_RESPONSE_OVERRIDE_VALUE_ACK);
-	DL_I2C_disableTargetACKOverride(config->regs);
-	DL_I2C_disableACKOverrideOnStart(config->regs);
+	DL_I2C_enableTargetACKOverride(config->regs);
+	DL_I2C_enableACKOverrideOnStart(config->regs);
 	DL_I2C_enableTargetClockStretching(config->regs);
 	DL_I2C_enableTargetRXFullOnRXRequest(config->regs);
 	DL_I2C_enableTargetTXEmptyOnTXRequest(config->regs);
@@ -387,8 +404,8 @@ static int i2c_mspm0_init(const struct device *dev)
 	DL_I2C_setClockConfig(config->regs, &config->clock_cfg);
 	DL_I2C_enableAnalogGlitchFilter(config->regs);
 	DL_I2C_setTargetACKOverrideValue(config->regs, DL_I2C_TARGET_RESPONSE_OVERRIDE_VALUE_ACK);
-	DL_I2C_disableTargetACKOverride(config->regs);
-	DL_I2C_disableACKOverrideOnStart(config->regs);
+	DL_I2C_enableTargetACKOverride(config->regs);
+	DL_I2C_enableACKOverrideOnStart(config->regs);
 	DL_I2C_disableInterrupt(config->regs, MSPM0_I2C_IRQS);
 	DL_I2C_clearInterruptStatus(config->regs, MSPM0_I2C_IRQS);
 
