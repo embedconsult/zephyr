@@ -1,0 +1,12 @@
+# Copyright (c) 2026 EmbedConsult
+#
+# SPDX-License-Identifier: Apache-2.0
+
+config I2C_MSPM0
+	bool "TI MSPM0 I2C driver"
+	default y
+	depends on DT_HAS_TI_MSPM0_I2C_ENABLED
+	select PINCTRL
+	select USE_MSPM0_DL_I2C
+	help
+	  Enable support for I2C on TI MSPM0 devices.

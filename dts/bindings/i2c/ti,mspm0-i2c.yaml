@@ -1,0 +1,32 @@
+description: TI MSPM0 I2C
+
+compatible: "ti,mspm0-i2c"
+
+include: [i2c-controller.yaml, pinctrl-device.yaml, base.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  pinctrl-0:
+    required: true
+
+  pinctrl-names:
+    required: true
+
+  clk-div:
+    type: int
+    default: 1
+    enum:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+    description: Clock divider selection value.
