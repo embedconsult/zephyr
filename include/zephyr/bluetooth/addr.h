@@ -84,8 +84,8 @@ static inline int bt_addr_cmp(const bt_addr_t *a, const bt_addr_t *b)
 
 /** @brief Determine equality of two Bluetooth device addresses.
  *
- *  @retval #true if the two addresses are equal
- *  @retval #false otherwise
+ *  @retval true if the two addresses are equal
+ *  @retval false otherwise
  */
 static inline bool bt_addr_eq(const bt_addr_t *a, const bt_addr_t *b)
 {
@@ -111,8 +111,8 @@ static inline int bt_addr_le_cmp(const bt_addr_le_t *a, const bt_addr_le_t *b)
  *  The Bluetooth LE addresses are equal if and only if both the types and
  *  the 48-bit addresses are numerically equal.
  *
- *  @retval #true if the two addresses are equal
- *  @retval #false otherwise
+ *  @retval true if the two addresses are equal
+ *  @retval false otherwise
  */
 static inline bool bt_addr_le_eq(const bt_addr_le_t *a, const bt_addr_le_t *b)
 {
@@ -266,6 +266,44 @@ static inline int bt_addr_le_to_str(const bt_addr_le_t *addr, char *str,
 			addr->a.val[5], addr->a.val[4], addr->a.val[3],
 			addr->a.val[2], addr->a.val[1], addr->a.val[0], type);
 }
+
+/** @cond INTERNAL_HIDDEN */
+struct bt_addr_tmp_str {
+	char str[BT_ADDR_STR_LEN];
+};
+
+struct bt_addr_tmp_str bt_addr_tmp_str(const bt_addr_t *addr);
+
+struct bt_addr_le_tmp_str {
+	char str[BT_ADDR_LE_STR_LEN];
+};
+
+struct bt_addr_le_tmp_str bt_addr_le_tmp_str(const bt_addr_le_t *addr);
+/** @endcond  */
+
+/**
+ * @brief Convert a Bluetooth address to a string
+ * @def bt_addr_str()
+ *
+ * @param _addr Pointer to the Bluetooth address (bt_addr_t)
+ *
+ * @return A string pointer which is only valid until the end of the full expression.
+ *         In practice this means that this is primarily useful as an input parameter
+ *         to printk/printf or logging calls.
+ */
+#define bt_addr_str(_addr) bt_addr_tmp_str(_addr).str
+
+/**
+ * @brief Convert a Bluetooth LE address to a string
+ * @def bt_addr_le_str()
+ *
+ * @param _addr Pointer to the Bluetooth LE address (bt_addr_le_t)
+ *
+ * @return A string pointer which is only valid until the end of the full expression.
+ *         In practice this means that this is primarily useful as an input parameter
+ *         to printk/printf or logging calls.
+ */
+#define bt_addr_le_str(_addr) bt_addr_le_tmp_str(_addr).str
 
 /** @brief Convert Bluetooth address from string to binary.
  *

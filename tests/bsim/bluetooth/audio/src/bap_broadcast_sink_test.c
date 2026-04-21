@@ -11,8 +11,8 @@
 #include <string.h>
 
 #include <zephyr/autoconf.h>
-#include <zephyr/autoconf.h>
 #include <zephyr/bluetooth/addr.h>
+#include <zephyr/bluetooth/assigned_numbers.h>
 #include <zephyr/bluetooth/audio/audio.h>
 #include <zephyr/bluetooth/audio/bap.h>
 #include <zephyr/bluetooth/audio/bap_lc3_preset.h>
@@ -299,7 +299,6 @@ static struct bt_bap_broadcast_sink_cb broadcast_sink_cbs = {
 static bool scan_check_and_sync_broadcast(struct bt_data *data, void *user_data)
 {
 	const struct bt_le_scan_recv_info *info = user_data;
-	char le_addr[BT_ADDR_LE_STR_LEN];
 	struct bt_uuid_16 adv_uuid;
 	uint32_t broadcast_id;
 
@@ -326,10 +325,8 @@ static bool scan_check_and_sync_broadcast(struct bt_data *data, void *user_data)
 
 	broadcast_id = sys_get_le24(data->data + BT_UUID_SIZE_16);
 
-	bt_addr_le_to_str(info->addr, le_addr, sizeof(le_addr));
-
 	printk("Found broadcaster with ID 0x%06X and addr %s and sid 0x%02X\n", broadcast_id,
-	       le_addr, info->sid);
+	       bt_addr_le_str(info->addr), info->sid);
 
 	SET_FLAG(flag_broadcaster_found);
 
@@ -456,7 +453,7 @@ static struct bt_bap_scan_delegator_cb scan_delegator_cbs = {
 
 static void validate_stream_codec_cfg(const struct bt_bap_stream *stream)
 {
-	struct bt_audio_codec_cfg *codec_cfg = stream->codec_cfg;
+	const struct bt_audio_codec_cfg *codec_cfg = stream->codec_cfg;
 	enum bt_audio_location chan_allocation;
 	uint8_t frames_blocks_per_sdu;
 	size_t min_sdu_size_required;
@@ -565,11 +562,13 @@ static void stream_started_cb(struct bt_bap_stream *stream)
 {
 	struct audio_test_stream *test_stream = audio_test_stream_from_bap_stream(stream);
 	struct bt_bap_ep_info info;
+	struct bt_conn *ep_conn;
 	int err;
 
 	memset(&test_stream->last_info, 0, sizeof(test_stream->last_info));
 	test_stream->rx_cnt = 0U;
 	test_stream->valid_rx_cnt = 0U;
+	UNSET_FLAG(test_stream->flag_audio_received);
 
 	err = bt_bap_ep_get_info(stream->ep, &info);
 	if (err != 0) {
@@ -599,6 +598,12 @@ static void stream_started_cb(struct bt_bap_stream *stream)
 
 	if (info.paired_ep != NULL) {
 		FAIL("Unexpected info.paired_ep: %p\n", info.paired_ep);
+		return;
+	}
+
+	ep_conn = bt_bap_ep_get_conn(stream->ep);
+	if (ep_conn != NULL) {
+		FAIL("Invalid conn from endpoint: %p", ep_conn);
 		return;
 	}
 
@@ -920,6 +925,17 @@ static void test_broadcast_delete_inval(void)
 	}
 }
 
+static void wait_for_data(void)
+{
+	printk("Waiting for data\n");
+	ARRAY_FOR_EACH_PTR(broadcast_sink_streams, test_stream) {
+		if (audio_test_stream_is_streaming(test_stream)) {
+			WAIT_FOR_FLAG(test_stream->flag_audio_received);
+		}
+	}
+	printk("Data received\n");
+}
+
 static void test_common(void)
 {
 	int err;
@@ -953,8 +969,7 @@ static void test_common(void)
 		k_sem_take(&sem_stream_started, K_FOREVER);
 	}
 
-	printk("Waiting for data\n");
-	WAIT_FOR_FLAG(flag_audio_received);
+	wait_for_data();
 	backchannel_sync_send_all(); /* let other devices know we have received what we wanted */
 }
 
@@ -1067,8 +1082,7 @@ static void test_sink_encrypted(void)
 		k_sem_take(&sem_stream_started, K_FOREVER);
 	}
 
-	printk("Waiting for data\n");
-	WAIT_FOR_FLAG(flag_audio_received);
+	wait_for_data();
 
 	backchannel_sync_send_all(); /* let other devices know we have received data */
 
@@ -1122,9 +1136,7 @@ static void test_sink_encrypted_incorrect_code(void)
 		k_sem_take(&sem_stream_started, K_FOREVER);
 	}
 
-	printk("Waiting for data\n");
-	WAIT_FOR_FLAG(flag_audio_received);
-	printk("Data received\n");
+	wait_for_data();
 
 	backchannel_sync_send_all(); /* let other devices know we have received data */
 	backchannel_sync_send_all(); /* let the broadcast source know it can stop */
@@ -1171,8 +1183,7 @@ static void broadcast_sink_with_assistant(void)
 		k_sem_take(&sem_stream_started, K_FOREVER);
 	}
 
-	printk("Waiting for data\n");
-	WAIT_FOR_FLAG(flag_audio_received);
+	wait_for_data();
 	backchannel_sync_send_all(); /* let other devices know we have received what we wanted */
 
 	printk("Waiting for BIG sync terminate request\n");

@@ -10,11 +10,14 @@ supported:
   - arduino_gpio
   - arduino_serial
   - arduino_i2c
+  - crc
   - dac
   - gpio
   - i2c
   - pwm
-  - usart
   - tsc
+  - usart
+  - usb_device
+  - usbd
 ram: 32
 flash: 256

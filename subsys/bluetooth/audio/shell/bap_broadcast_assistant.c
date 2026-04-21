@@ -14,10 +14,12 @@
 #include <string.h>
 
 #include <zephyr/autoconf.h>
+#include <zephyr/bluetooth/assigned_numbers.h>
 #include <zephyr/bluetooth/audio/audio.h>
 #include <zephyr/bluetooth/audio/bap.h>
 #include <zephyr/bluetooth/addr.h>
 #include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gap.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/hci.h>
@@ -53,6 +55,18 @@ static struct bt_auto_scan {
 struct bt_scan_recv_info {
 	uint32_t broadcast_id;
 	char broadcast_name[BT_AUDIO_BROADCAST_NAME_LEN_MAX + 1];
+};
+
+struct broadcast_assistant_recv_state broadcast_assistant_recv_states[CONFIG_BT_MAX_CONN];
+
+static void disconnected_cb(struct bt_conn *conn, uint8_t reason)
+{
+	(void)memset(&broadcast_assistant_recv_states[bt_conn_index(conn)], 0,
+		     sizeof(broadcast_assistant_recv_states[0]));
+}
+
+BT_CONN_CB_DEFINE(conn_callbacks) = {
+	.disconnected = disconnected_cb,
 };
 
 static bool pa_decode_base(struct bt_data *data, void *user_data)
@@ -98,18 +112,18 @@ static void bap_broadcast_assistant_discover_cb(struct bt_conn *conn, int err,
 		bt_shell_error("BASS discover failed (%d)", err);
 	} else {
 		bt_shell_print("BASS discover done with %u recv states", recv_state_count);
+		broadcast_assistant_recv_states[bt_conn_index(conn)].recv_state_count =
+			recv_state_count;
 	}
 }
 
 static void bap_broadcast_assistant_scan_cb(const struct bt_le_scan_recv_info *info,
 					    uint32_t broadcast_id)
 {
-	char le_addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(info->addr, le_addr, sizeof(le_addr));
 	bt_shell_print(
 		"[DEVICE]: %s, broadcast_id 0x%06X, interval (ms) %u (0x%04x)), SID 0x%x, RSSI %i",
-		le_addr, broadcast_id, BT_GAP_PER_ADV_INTERVAL_TO_MS(info->interval),
+		bt_addr_le_str(info->addr), broadcast_id,
+		BT_GAP_PER_ADV_INTERVAL_TO_MS(info->interval),
 		info->interval, info->sid, info->rssi);
 }
 
@@ -129,7 +143,6 @@ static void bap_broadcast_assistant_recv_state_cb(
 	struct bt_conn *conn, int err,
 	const struct bt_bap_scan_delegator_recv_state *state)
 {
-	char le_addr[BT_ADDR_LE_STR_LEN];
 	char bad_code[33];
 	bool is_bad_code;
 
@@ -138,14 +151,13 @@ static void bap_broadcast_assistant_recv_state_cb(
 		return;
 	}
 
-	bt_addr_le_to_str(&state->addr, le_addr, sizeof(le_addr));
 	bin2hex(state->bad_code, BT_ISO_BROADCAST_CODE_SIZE, bad_code, sizeof(bad_code));
 
 	is_bad_code = state->encrypt_state == BT_BAP_BIG_ENC_STATE_BAD_CODE;
 	bt_shell_print(
 		"BASS recv state: src_id %u, addr %s, sid %u, broadcast_id 0x%06X, sync_state "
 		"%u, encrypt_state %u%s%s",
-		state->src_id, le_addr, state->adv_sid, state->broadcast_id,
+		state->src_id, bt_addr_le_str(&state->addr), state->adv_sid, state->broadcast_id,
 		state->pa_sync_state, state->encrypt_state, is_bad_code ? ", bad code" : "",
 		is_bad_code ? bad_code : "");
 
@@ -166,6 +178,7 @@ static void bap_broadcast_assistant_recv_state_cb(
 		struct bt_le_ext_adv *ext_adv = NULL;
 
 		/* Lookup matching PA sync */
+		/* TODO: Need to consider SID and Broadcast ID as well */
 		for (size_t i = 0U; i < ARRAY_SIZE(per_adv_syncs); i++) {
 			if (per_adv_syncs[i] != NULL &&
 			    bt_addr_le_eq(&per_adv_syncs[i]->addr, &state->addr)) {
@@ -176,12 +189,33 @@ static void bap_broadcast_assistant_recv_state_cb(
 		}
 
 		if (per_adv_sync && IS_ENABLED(CONFIG_BT_PER_ADV_SYNC_TRANSFER_SENDER)) {
+
+			struct bt_le_per_adv_sync_info sync_info;
+			const bool adva_matches_ea = false; /* don't know */
+			bool adva_matches_src_addr;
+			uint16_t service_data = 0U;
+
+			err = bt_le_per_adv_sync_get_info(per_adv_sync, &sync_info);
+			if (err != 0) {
+				bt_shell_error("Failed to get sync info: %d", err);
+
+				return;
+			}
+
+			adva_matches_src_addr = bt_addr_le_eq(&sync_info.addr, &state->addr);
+
+			if (!adva_matches_ea) {
+				service_data |= BIT(0);
+			}
+			if (!adva_matches_src_addr) {
+				service_data |= BIT(1);
+			}
+
+			service_data |= ((uint16_t)state->src_id << 8);
+
 			bt_shell_print("Sending PAST");
 
-			err = bt_le_per_adv_sync_transfer(per_adv_sync,
-							  conn,
-							  BT_UUID_BASS_VAL);
-
+			err = bt_le_per_adv_sync_transfer(per_adv_sync, conn, service_data);
 			if (err != 0) {
 				bt_shell_error("Could not transfer periodic adv sync: %d", err);
 			}
@@ -213,10 +247,32 @@ static void bap_broadcast_assistant_recv_state_cb(
 
 		if (ext_adv != NULL && IS_ENABLED(CONFIG_BT_PER_ADV) &&
 		    IS_ENABLED(CONFIG_BT_PER_ADV_SYNC_TRANSFER_SENDER)) {
+			struct bt_le_ext_adv_info adv_info;
+			const bool adva_matches_ea = false; /* don't know */
+			bool adva_matches_src_addr;
+			uint16_t service_data = 0U;
+
 			bt_shell_print("Sending local PAST");
 
-			err = bt_le_per_adv_set_info_transfer(ext_adv, conn,
-							      BT_UUID_BASS_VAL);
+			err = bt_le_ext_adv_get_info(ext_adv, &adv_info);
+			if (err != 0) {
+				bt_shell_error("Failed to get sync info: %d", err);
+
+				return;
+			}
+
+			adva_matches_src_addr = bt_addr_le_eq(adv_info.addr, &state->addr);
+
+			if (!adva_matches_ea) {
+				service_data |= BIT(0);
+			}
+			if (!adva_matches_src_addr) {
+				service_data |= BIT(1);
+			}
+
+			service_data |= ((uint16_t)state->src_id << 8);
+
+			err = bt_le_per_adv_set_info_transfer(ext_adv, conn, service_data);
 
 			if (err != 0) {
 				bt_shell_error("Could not transfer per adv set info: %d", err);
@@ -225,6 +281,29 @@ static void bap_broadcast_assistant_recv_state_cb(
 			bt_shell_error("Could not send PA to Scan Delegator");
 		}
 	}
+
+#if defined(CONFIG_BT_BAP_BROADCAST_SOURCE)
+	/* The combination of broadcast ID, address type and SID is what makes a receive state
+	 * unique - Use that to compare when storing the src_id related to our broadcast
+	 */
+	if (err == 0 && state->broadcast_id == default_source.broadcast_id &&
+	    state->addr.type == default_source.addr_type &&
+	    state->adv_sid == default_source.adv_sid) {
+		struct broadcast_assistant_recv_state *recv_state =
+			&broadcast_assistant_recv_states[bt_conn_index(conn)];
+
+		recv_state->default_source_src_id = state->src_id;
+		recv_state->default_source_subgroup_count = state->num_subgroups;
+
+		recv_state->default_source_big_synced = false;
+		for (uint8_t i = 0U; i < state->num_subgroups; i++) {
+			if (state->subgroups[i].bis_sync != 0) {
+				recv_state->default_source_big_synced = true;
+				break;
+			}
+		}
+	}
+#endif /* CONFIG_BT_BAP_BROADCAST_SOURCE */
 }
 
 static void bap_broadcast_assistant_recv_state_removed_cb(struct bt_conn *conn, uint8_t src_id)
@@ -530,10 +609,7 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info,
 
 	/* Verify that it is a BAP broadcaster*/
 	if (sr_info.broadcast_id != BT_BAP_INVALID_BROADCAST_ID) {
-		char addr_str[BT_ADDR_LE_STR_LEN];
 		bool identified_broadcast = false;
-
-		bt_addr_le_to_str(info->addr, addr_str, sizeof(addr_str));
 
 		if (sr_info.broadcast_id == auto_scan.broadcast_id) {
 			identified_broadcast = true;
@@ -544,13 +620,13 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info,
 			identified_broadcast = true;
 
 			bt_shell_print("Found matched broadcast name '%s' with address %s",
-				       sr_info.broadcast_name, addr_str);
+				       sr_info.broadcast_name, bt_addr_le_str(info->addr));
 		}
 
 		if (identified_broadcast) {
 			bt_shell_print(
 				"Found BAP broadcast source with address %s and ID 0x%06X\n",
-				addr_str, sr_info.broadcast_id);
+				bt_addr_le_str(info->addr), sr_info.broadcast_id);
 
 			err = bt_le_scan_stop();
 			if (err) {

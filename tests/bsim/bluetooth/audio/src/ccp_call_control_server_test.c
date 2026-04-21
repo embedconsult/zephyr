@@ -30,16 +30,12 @@ static struct bt_ccp_call_control_server_bearer
 CREATE_FLAG(is_connected);
 static void connected(struct bt_conn *conn, uint8_t err)
 {
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
 	if (err != 0) {
-		FAIL("Failed to connect to %s (%u)\n", addr, err);
+		FAIL("Failed to connect to %s (%u)\n", bt_conn_dst_str(conn), err);
 		return;
 	}
 
-	LOG_DBG("Connected to %s", addr);
+	LOG_DBG("Connected to %s", bt_conn_dst_str(conn));
 
 	default_conn = bt_conn_ref(conn);
 	SET_FLAG(is_connected);
@@ -59,7 +55,7 @@ static void init(void)
 		.gtbs = true,
 		.authorization_required = false,
 		.technology = BT_TBS_TECHNOLOGY_3G,
-		.supported_features = CONFIG_BT_TBS_SUPPORTED_FEATURES,
+		.supported_features = BT_TBS_FEATURE_HOLD | BT_TBS_FEATURE_JOIN,
 	};
 	int err;
 
@@ -105,7 +101,7 @@ static void init(void)
 			.authorization_required = false,
 			/* Set different technologies per bearer */
 			.technology = (i % BT_TBS_TECHNOLOGY_WCDMA) + 1,
-			.supported_features = CONFIG_BT_TBS_SUPPORTED_FEATURES,
+			.supported_features = BT_TBS_FEATURE_HOLD | BT_TBS_FEATURE_JOIN,
 		};
 
 		snprintf(prov_name, sizeof(prov_name), "Telephone Bearer #%d", i);

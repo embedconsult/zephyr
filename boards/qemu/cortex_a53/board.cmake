@@ -20,7 +20,6 @@ set(QEMU_FLAGS_${ARCH}
   -global virtio-mmio.force-legacy=false
   -cpu ${QEMU_CPU_TYPE_${ARCH}}
   ${QEMU_VIRTIO_ENTROPY_FLAGS}
-  -nographic
   -machine ${QEMU_MACH}
   )
 
@@ -33,4 +32,4 @@ if(CONFIG_XIP)
   )
 endif()
 
-board_set_debugger_ifnset(qemu)
+include(${ZEPHYR_BASE}/boards/common/qemu.board.cmake)

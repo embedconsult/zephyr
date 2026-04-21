@@ -9,8 +9,8 @@
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys/sys_io.h>
-#include <nrf_ironside/tdd.h>
-#include <uicr/uicr.h>
+#include <ironside/se/api.h>
+#include <ironside_zephyr/se/uicr_periphconf.h>
 
 #undef ETR_MODE_MODE_CIRCULARBUF
 
@@ -62,7 +62,7 @@ static void nrf_cti_for_tpiu_init(void)
 
 	coresight_unlock(cti210);
 
-	/* Connect CTI channel to TPIU formatter flushin */
+	/* Connect CTI channel to TPIU formatter flushing */
 	sys_write32(BIT(CTI_CH_TPIU_FLUSH_REQ_OFFSET), cti210 + CTI_CTIOUTEN0_OFFSET);
 	sys_write32(BIT(CTI_CH_TPIU_FLUSH_REQ_OFFSET), cti210 + CTI_CTIGATE_OFFSET);
 	sys_write32(CTI_CTICONTROL_GLBEN_Msk, cti210 + CTI_CTICONTROL_OFFSET);
@@ -95,6 +95,7 @@ static void nrf_tpiu_init(void)
 	LOG_INF("CoreSight Host TPIU initialized");
 }
 
+#ifdef CONFIG_DEBUG_NRF_ETR
 static void nrf_etr_init(uintptr_t buf, size_t buf_word_len)
 {
 	mem_addr_t etr = DT_REG_ADDR(DT_NODELABEL(etr));
@@ -113,6 +114,7 @@ static void nrf_etr_init(uintptr_t buf, size_t buf_word_len)
 
 	LOG_INF("Coresight Host ETR initialized");
 }
+#endif
 
 static void nrf_stm_init(void)
 {
@@ -187,6 +189,7 @@ static void nrf_atbreplicator_init(mem_addr_t replicator_addr, uint32_t filter, 
 	coresight_lock(replicator_addr);
 }
 
+#if CONFIG_DEBUG_NRF_ETR
 static int coresight_nrf_init_stm_etr(uintptr_t buf, size_t buf_word_len)
 {
 	mem_addr_t atbfunnel211 = DT_REG_ADDR(DT_NODELABEL(atbfunnel211));
@@ -203,6 +206,7 @@ static int coresight_nrf_init_stm_etr(uintptr_t buf, size_t buf_word_len)
 
 	return 0;
 }
+#endif
 
 static int coresight_nrf_init_stm_tpiu(void)
 {
@@ -248,12 +252,14 @@ static int coresight_nrf_init(const struct device *dev)
 	case CORESIGHT_NRF_MODE_STM_TPIU: {
 		return coresight_nrf_init_stm_tpiu();
 	}
+#ifdef CONFIG_DEBUG_NRF_ETR
 	case CORESIGHT_NRF_MODE_STM_ETR: {
 		uintptr_t etr_buffer = DT_REG_ADDR(DT_NODELABEL(etr_buffer));
 		size_t buf_word_len = DT_REG_SIZE(DT_NODELABEL(etr_buffer)) / sizeof(uint32_t);
 
 		return coresight_nrf_init_stm_etr(etr_buffer, buf_word_len);
 	}
+#endif
 	default: {
 		LOG_ERR("Unsupported Coresight mode");
 		return -ENOTSUP;
@@ -262,7 +268,7 @@ static int coresight_nrf_init(const struct device *dev)
 	return 0;
 }
 
-#define DEBUG_CORESIGHT_NRF_INIT_PRIORITY UTIL_INC(CONFIG_NRF_IRONSIDE_CALL_INIT_PRIORITY)
+#define DEBUG_CORESIGHT_NRF_INIT_PRIORITY UTIL_INC(CONFIG_IRONSIDE_SE_CALL_INIT_PRIORITY)
 
 #define CORESIGHT_NRF_INST(inst)                                                                   \
 	COND_CODE_1(DT_INST_PINCTRL_HAS_IDX(inst, 0),                                      \

@@ -12,6 +12,7 @@
 
 #include <zephyr/autoconf.h>
 #include <zephyr/bluetooth/addr.h>
+#include <zephyr/bluetooth/assigned_numbers.h>
 #include <zephyr/bluetooth/audio/aics.h>
 #include <zephyr/bluetooth/audio/audio.h>
 #include <zephyr/bluetooth/audio/bap.h>
@@ -192,7 +193,6 @@ static struct bt_bap_broadcast_sink_cb broadcast_sink_cbs = {
 static bool scan_check_and_sync_broadcast(struct bt_data *data, void *user_data)
 {
 	const struct bt_le_scan_recv_info *info = user_data;
-	char le_addr[BT_ADDR_LE_STR_LEN];
 	struct bt_uuid_16 adv_uuid;
 	uint32_t broadcast_id;
 
@@ -219,10 +219,8 @@ static bool scan_check_and_sync_broadcast(struct bt_data *data, void *user_data)
 
 	broadcast_id = sys_get_le24(data->data + BT_UUID_SIZE_16);
 
-	bt_addr_le_to_str(info->addr, le_addr, sizeof(le_addr));
-
 	printk("Found broadcaster with ID 0x%06X and addr %s and sid 0x%02X\n", broadcast_id,
-	       le_addr, info->sid);
+	       bt_addr_le_str(info->addr), info->sid);
 
 	SET_FLAG(flag_broadcaster_found);
 
@@ -282,6 +280,7 @@ static void started_cb(struct bt_bap_stream *stream)
 	test_stream->valid_rx_cnt = 0U;
 	test_stream->seq_num = 0U;
 	test_stream->tx_cnt = 0U;
+	UNSET_FLAG(test_stream->flag_audio_received);
 
 	printk("Stream %p started\n", stream);
 	k_sem_give(&sem_broadcast_started);
@@ -333,6 +332,7 @@ static void unicast_stream_started(struct bt_bap_stream *stream)
 	test_stream->valid_rx_cnt = 0U;
 	test_stream->seq_num = 0U;
 	test_stream->tx_cnt = 0U;
+	UNSET_FLAG(test_stream->flag_audio_received);
 
 	printk("Started stream %p\n", stream);
 
@@ -782,7 +782,7 @@ static void init(void)
 
 		err = bt_bap_scan_delegator_register(&scan_delegator_cbs);
 		if (err != 0) {
-			FAIL("Scan deligator register failed (err %d)\n", err);
+			FAIL("Scan delegator register failed (err %d)\n", err);
 
 			return;
 		}
@@ -796,7 +796,6 @@ static void init(void)
 		UNSET_FLAG(flag_base_received);
 		UNSET_FLAG(flag_pa_synced);
 		UNSET_FLAG(flag_pa_request);
-		UNSET_FLAG(flag_audio_received);
 		UNSET_FLAG(flag_base_metadata_updated);
 		UNSET_FLAG(flag_bis_sync_requested);
 
@@ -882,7 +881,11 @@ static void init(void)
 static void wait_for_data(void)
 {
 	printk("Waiting for data\n");
-	WAIT_FOR_FLAG(flag_audio_received);
+	ARRAY_FOR_EACH_PTR(broadcast_sink_streams, test_stream) {
+		if (audio_test_stream_is_streaming(test_stream)) {
+			WAIT_FOR_FLAG(test_stream->flag_audio_received);
+		}
+	}
 	printk("Data received\n");
 }
 
